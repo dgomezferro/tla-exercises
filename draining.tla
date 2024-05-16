@@ -37,7 +37,7 @@ Values == 0..MAX_VALUES
 (*--algorithm draining {
 variables 
     allDocs = [x \in Docs |-> 0]; \* global view of the data
-    chunks \in BoundedPartitions(Docs, 2, MAX_CHUNKS); \* try all chunk arrangmenets with at least 2 chunks no more than MAX_CHUNKS
+    chunks \in BoundedPartitions(Docs, 2, MAX_CHUNKS); \* try all chunk arrangmenets with at least 2 chunks and no more than MAX_CHUNKS
     pendingWrites = [x \in chunks |-> <<>> ]; \* pending writes on each chunk
     writesBlocked = [x \in chunks |-> FALSE ]; \* whether writes are blocked on each chunk
     ownership \in [chunks -> SHARDS]; \* What shard owns which chunk
@@ -45,8 +45,8 @@ variables
 
 define {
 
-TypeOK ==   /\ pendingWrites <= MAX_WRITES
-            /\ \A s \in chunks : writesBlocked[s] = TRUE /\ writesBlocked[s] = FALSE
+TypeOK ==   /\ \A c \in chunks : Len(pendingWrites[c]) <= MAX_WRITES
+            /\ \A c \in chunks : writesBlocked[c] = TRUE \/ writesBlocked[c] = FALSE
             
 \* Map doc to chunk
 DocToChunk(d) == CHOOSE c \in chunks : d \in c
@@ -146,13 +146,13 @@ WRITER_WRITE:
 
 
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "bb80e73" /\ chksum(tla) = "df1a3817")
+\* BEGIN TRANSLATION (chksum(pcal) = "34115dec" /\ chksum(tla) = "bfa65b4e")
 VARIABLES allDocs, chunks, pendingWrites, writesBlocked, ownership, shardDocs, 
           pc
 
 (* define statement *)
-TypeOK ==   /\ pendingWrites <= MAX_WRITES
-            /\ \A s \in chunks : writesBlocked[s] = TRUE /\ writesBlocked[s] = FALSE
+TypeOK ==   /\ \A c \in chunks : Len(pendingWrites[c]) <= MAX_WRITES
+            /\ \A c \in chunks : writesBlocked[c] = TRUE \/ writesBlocked[c] = FALSE
 
 
 DocToChunk(d) == CHOOSE c \in chunks : d \in c
@@ -173,7 +173,7 @@ ProcSet == {1} \cup {2}
 
 Init == (* Global variables *)
         /\ allDocs = [x \in Docs |-> 0]
-        /\ chunks \in BoundedPartitions(Docs, 1, MAX_CHUNKS)
+        /\ chunks \in BoundedPartitions(Docs, 2, MAX_CHUNKS)
         /\ pendingWrites = [x \in chunks |-> <<>> ]
         /\ writesBlocked = [x \in chunks |-> FALSE ]
         /\ ownership \in [chunks -> SHARDS]
@@ -382,5 +382,5 @@ Spec == /\ Init /\ [][Next]_vars
 \* END TRANSLATION 
 =============================================================================
 \* Modification History
-\* Last modified Thu May 16 13:46:11 CEST 2024 by dgomezferro
+\* Last modified Thu May 16 13:58:28 CEST 2024 by dgomezferro
 \* Created Wed May 15 14:17:17 CEST 2024 by dgomezferro
