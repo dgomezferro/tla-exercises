@@ -68,16 +68,16 @@ Consistent == \A d \in Docs : allDocs[d] = shardDocs[ownership[DocToChunk(d)]][d
 }
 
 \* Transfers a sequence of writes to the destination shard 
-procedure transferMods(mods, destShard) 
-variables i = 1;
-{
-TRANSFER_MODS:
-    while (i <= Len(mods)) {
-        shardDocs[destShard][mods[i].key] := mods[i].value;
-        i := i+1;
-    };
-    return;
-}
+\*procedure transferMods(mods, destShard) 
+\*variables i = 1;
+\*{
+\*TRANSFER_MODS:
+\*    while (i <= Len(mods)) {
+\*        shardDocs[destShard][mods[i].key] := mods[i].value;
+\*        i := i+1;
+\*    };
+\*    return;
+\*}
 
 fair process (driver \in DRIVERS) 
 variables
@@ -86,6 +86,7 @@ variables
     sourceShard = 0;
     destShard = 0;
     docsToCopy = {};
+    i = 0;
 {
 DRIVER_START:
 while(TRUE) {
@@ -111,22 +112,29 @@ DRIVER_CLONING:
 DRIVER_CATCHUP:
     while(~writesBlocked[chunkToMove]) {
 DRIVER_COMPUTE_MODS:
+        i:=1;
         mods := pendingWrites[chunkToMove];
         pendingWrites[chunkToMove] := <<>>;
-DRIVER_ENTER_CS:
         if(Len(mods) < THRESHOLD) {
 DRIVER_BLOCK_WRITES:
             writesBlocked[chunkToMove] := TRUE;
         };
 DRIVER_TRANSFER_MODS:
-        call transferMods(mods, destShard);
+        while (i <= Len(mods)) {
+            shardDocs[destShard][mods[i].key] := mods[i].value;
+            i := i+1;
+        };
     };
 \* One last iteration of TRANSFER_MODS
 DRIVER_LAST_COMPUTE_MODS:
     mods := pendingWrites[chunkToMove];
     pendingWrites[chunkToMove] := <<>>;
+    i := 1;
 DRIVER_LAST_TRANSFER_MODS:
-    call transferMods(mods, destShard);
+    while (i <= Len(mods)) {
+        shardDocs[destShard][mods[i].key] := mods[i].value;
+        i := i+1;
+    };
 DRIVER_COMMIT_MOVE:
     moveInProgress[chunkToMove] := FALSE;
     ownership[chunkToMove] := destShard;
@@ -169,12 +177,9 @@ WRITER_WRITE:
 
 
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "5716a65a" /\ chksum(tla) = "fb19332b")
-\* Process variable mods of process driver at line 85 col 5 changed to mods_
-\* Process variable destShard of process driver at line 87 col 5 changed to destShard_
-CONSTANT defaultInitValue
+\* BEGIN TRANSLATION (chksum(pcal) = "9974396f" /\ chksum(tla) = "e6a4ca2d")
 VARIABLES allDocs, chunks, pendingWrites, writesBlocked, moveInProgress, 
-          ownership, shardDocs, pc, stack
+          ownership, shardDocs, pc
 
 (* define statement *)
 TypeOK ==   /\ \A c \in chunks : Len(pendingWrites[c]) <= MAX_WRITES
@@ -194,13 +199,13 @@ NotInProgressChunks == {x \in chunks: ~moveInProgress[x]}
 
 Consistent == \A d \in Docs : allDocs[d] = shardDocs[ownership[DocToChunk(d)]][d]
 
-VARIABLES mods, destShard, i, chunkToMove, mods_, sourceShard, destShard_, 
-          docsToCopy, write, writeSuccesful, targetChunk, targetShard
+VARIABLES chunkToMove, mods, sourceShard, destShard, docsToCopy, i, write, 
+          writeSuccesful, targetChunk, targetShard
 
 vars == << allDocs, chunks, pendingWrites, writesBlocked, moveInProgress, 
-           ownership, shardDocs, pc, stack, mods, destShard, i, chunkToMove, 
-           mods_, sourceShard, destShard_, docsToCopy, write, writeSuccesful, 
-           targetChunk, targetShard >>
+           ownership, shardDocs, pc, chunkToMove, mods, sourceShard, 
+           destShard, docsToCopy, i, write, writeSuccesful, targetChunk, 
+           targetShard >>
 
 ProcSet == (DRIVERS) \cup (WRITERS)
 
@@ -212,54 +217,29 @@ Init == (* Global variables *)
         /\ moveInProgress = [x \in chunks |-> FALSE ]
         /\ ownership \in [chunks -> SHARDS]
         /\ shardDocs = [x \in SHARDS |-> [y \in Docs |-> 0]]
-        (* Procedure transferMods *)
-        /\ mods = [ self \in ProcSet |-> defaultInitValue]
-        /\ destShard = [ self \in ProcSet |-> defaultInitValue]
-        /\ i = [ self \in ProcSet |-> 1]
         (* Process driver *)
         /\ chunkToMove = [self \in DRIVERS |-> 0]
-        /\ mods_ = [self \in DRIVERS |-> 0]
+        /\ mods = [self \in DRIVERS |-> 0]
         /\ sourceShard = [self \in DRIVERS |-> 0]
-        /\ destShard_ = [self \in DRIVERS |-> 0]
+        /\ destShard = [self \in DRIVERS |-> 0]
         /\ docsToCopy = [self \in DRIVERS |-> {}]
+        /\ i = [self \in DRIVERS |-> 0]
         (* Process writer *)
         /\ write = [self \in WRITERS |-> 0]
         /\ writeSuccesful = [self \in WRITERS |-> FALSE]
         /\ targetChunk = [self \in WRITERS |-> 0]
         /\ targetShard = [self \in WRITERS |-> 0]
-        /\ stack = [self \in ProcSet |-> << >>]
         /\ pc = [self \in ProcSet |-> CASE self \in DRIVERS -> "DRIVER_START"
                                         [] self \in WRITERS -> "WRITER_START"]
-
-TRANSFER_MODS(self) == /\ pc[self] = "TRANSFER_MODS"
-                       /\ IF i[self] <= Len(mods[self])
-                             THEN /\ shardDocs' = [shardDocs EXCEPT ![destShard[self]][mods[self][i[self]].key] = mods[self][i[self]].value]
-                                  /\ i' = [i EXCEPT ![self] = i[self]+1]
-                                  /\ pc' = [pc EXCEPT ![self] = "TRANSFER_MODS"]
-                                  /\ UNCHANGED << stack, mods, destShard >>
-                             ELSE /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-                                  /\ i' = [i EXCEPT ![self] = Head(stack[self]).i]
-                                  /\ mods' = [mods EXCEPT ![self] = Head(stack[self]).mods]
-                                  /\ destShard' = [destShard EXCEPT ![self] = Head(stack[self]).destShard]
-                                  /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-                                  /\ UNCHANGED shardDocs
-                       /\ UNCHANGED << allDocs, chunks, pendingWrites, 
-                                       writesBlocked, moveInProgress, 
-                                       ownership, chunkToMove, mods_, 
-                                       sourceShard, destShard_, docsToCopy, 
-                                       write, writeSuccesful, targetChunk, 
-                                       targetShard >>
-
-transferMods(self) == TRANSFER_MODS(self)
 
 DRIVER_START(self) == /\ pc[self] = "DRIVER_START"
                       /\ pc' = [pc EXCEPT ![self] = "DRIVER_PICK_CHUNK"]
                       /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                       writesBlocked, moveInProgress, ownership, 
-                                      shardDocs, stack, mods, destShard, i, 
-                                      chunkToMove, mods_, sourceShard, 
-                                      destShard_, docsToCopy, write, 
-                                      writeSuccesful, targetChunk, targetShard >>
+                                      shardDocs, chunkToMove, mods, 
+                                      sourceShard, destShard, docsToCopy, i, 
+                                      write, writeSuccesful, targetChunk, 
+                                      targetShard >>
 
 DRIVER_PICK_CHUNK(self) == /\ pc[self] = "DRIVER_PICK_CHUNK"
                            /\ \E pickedChunk \in NotInProgressChunks:
@@ -269,21 +249,19 @@ DRIVER_PICK_CHUNK(self) == /\ pc[self] = "DRIVER_PICK_CHUNK"
                            /\ pc' = [pc EXCEPT ![self] = "DRIVER_PICK_SHARD"]
                            /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                            writesBlocked, ownership, shardDocs, 
-                                           stack, mods, destShard, i, mods_, 
-                                           destShard_, docsToCopy, write, 
-                                           writeSuccesful, targetChunk, 
+                                           mods, destShard, docsToCopy, i, 
+                                           write, writeSuccesful, targetChunk, 
                                            targetShard >>
 
 DRIVER_PICK_SHARD(self) == /\ pc[self] = "DRIVER_PICK_SHARD"
                            /\ \E pickedShard \in (SHARDS \ {sourceShard[self]}):
-                                destShard_' = [destShard_ EXCEPT ![self] = pickedShard]
+                                destShard' = [destShard EXCEPT ![self] = pickedShard]
                            /\ pc' = [pc EXCEPT ![self] = "DRIVER_START_MOVE"]
                            /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                            writesBlocked, moveInProgress, 
-                                           ownership, shardDocs, stack, mods, 
-                                           destShard, i, chunkToMove, mods_, 
-                                           sourceShard, docsToCopy, write, 
-                                           writeSuccesful, targetChunk, 
+                                           ownership, shardDocs, chunkToMove, 
+                                           mods, sourceShard, docsToCopy, i, 
+                                           write, writeSuccesful, targetChunk, 
                                            targetShard >>
 
 DRIVER_START_MOVE(self) == /\ pc[self] = "DRIVER_START_MOVE"
@@ -291,26 +269,25 @@ DRIVER_START_MOVE(self) == /\ pc[self] = "DRIVER_START_MOVE"
                            /\ pc' = [pc EXCEPT ![self] = "DRIVER_CLONING"]
                            /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                            writesBlocked, moveInProgress, 
-                                           ownership, shardDocs, stack, mods, 
-                                           destShard, i, chunkToMove, mods_, 
-                                           sourceShard, destShard_, write, 
-                                           writeSuccesful, targetChunk, 
+                                           ownership, shardDocs, chunkToMove, 
+                                           mods, sourceShard, destShard, i, 
+                                           write, writeSuccesful, targetChunk, 
                                            targetShard >>
 
 DRIVER_CLONING(self) == /\ pc[self] = "DRIVER_CLONING"
                         /\ IF docsToCopy[self] /= {}
                               THEN /\ \E doc \in docsToCopy[self]:
                                         /\ docsToCopy' = [docsToCopy EXCEPT ![self] = docsToCopy[self] \ {doc}]
-                                        /\ shardDocs' = [shardDocs EXCEPT ![destShard_[self]][doc] = shardDocs[sourceShard[self]][doc]]
+                                        /\ shardDocs' = [shardDocs EXCEPT ![destShard[self]][doc] = shardDocs[sourceShard[self]][doc]]
                                    /\ pc' = [pc EXCEPT ![self] = "DRIVER_CLONING"]
                               ELSE /\ pc' = [pc EXCEPT ![self] = "DRIVER_CATCHUP"]
                                    /\ UNCHANGED << shardDocs, docsToCopy >>
                         /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                         writesBlocked, moveInProgress, 
-                                        ownership, stack, mods, destShard, i, 
-                                        chunkToMove, mods_, sourceShard, 
-                                        destShard_, write, writeSuccesful, 
-                                        targetChunk, targetShard >>
+                                        ownership, chunkToMove, mods, 
+                                        sourceShard, destShard, i, write, 
+                                        writeSuccesful, targetChunk, 
+                                        targetShard >>
 
 DRIVER_CATCHUP(self) == /\ pc[self] = "DRIVER_CATCHUP"
                         /\ IF ~writesBlocked[chunkToMove[self]]
@@ -318,117 +295,97 @@ DRIVER_CATCHUP(self) == /\ pc[self] = "DRIVER_CATCHUP"
                               ELSE /\ pc' = [pc EXCEPT ![self] = "DRIVER_LAST_COMPUTE_MODS"]
                         /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                         writesBlocked, moveInProgress, 
-                                        ownership, shardDocs, stack, mods, 
-                                        destShard, i, chunkToMove, mods_, 
-                                        sourceShard, destShard_, docsToCopy, 
-                                        write, writeSuccesful, targetChunk, 
-                                        targetShard >>
+                                        ownership, shardDocs, chunkToMove, 
+                                        mods, sourceShard, destShard, 
+                                        docsToCopy, i, write, writeSuccesful, 
+                                        targetChunk, targetShard >>
 
 DRIVER_COMPUTE_MODS(self) == /\ pc[self] = "DRIVER_COMPUTE_MODS"
-                             /\ mods_' = [mods_ EXCEPT ![self] = pendingWrites[chunkToMove[self]]]
+                             /\ i' = [i EXCEPT ![self] = 1]
+                             /\ mods' = [mods EXCEPT ![self] = pendingWrites[chunkToMove[self]]]
                              /\ pendingWrites' = [pendingWrites EXCEPT ![chunkToMove[self]] = <<>>]
-                             /\ pc' = [pc EXCEPT ![self] = "DRIVER_ENTER_CS"]
+                             /\ IF Len(mods'[self]) < THRESHOLD
+                                   THEN /\ pc' = [pc EXCEPT ![self] = "DRIVER_BLOCK_WRITES"]
+                                   ELSE /\ pc' = [pc EXCEPT ![self] = "DRIVER_TRANSFER_MODS"]
                              /\ UNCHANGED << allDocs, chunks, writesBlocked, 
                                              moveInProgress, ownership, 
-                                             shardDocs, stack, mods, destShard, 
-                                             i, chunkToMove, sourceShard, 
-                                             destShard_, docsToCopy, write, 
-                                             writeSuccesful, targetChunk, 
-                                             targetShard >>
-
-DRIVER_ENTER_CS(self) == /\ pc[self] = "DRIVER_ENTER_CS"
-                         /\ IF Len(mods_[self]) < THRESHOLD
-                               THEN /\ pc' = [pc EXCEPT ![self] = "DRIVER_BLOCK_WRITES"]
-                               ELSE /\ pc' = [pc EXCEPT ![self] = "DRIVER_TRANSFER_MODS"]
-                         /\ UNCHANGED << allDocs, chunks, pendingWrites, 
-                                         writesBlocked, moveInProgress, 
-                                         ownership, shardDocs, stack, mods, 
-                                         destShard, i, chunkToMove, mods_, 
-                                         sourceShard, destShard_, docsToCopy, 
-                                         write, writeSuccesful, targetChunk, 
-                                         targetShard >>
+                                             shardDocs, chunkToMove, 
+                                             sourceShard, destShard, 
+                                             docsToCopy, write, writeSuccesful, 
+                                             targetChunk, targetShard >>
 
 DRIVER_BLOCK_WRITES(self) == /\ pc[self] = "DRIVER_BLOCK_WRITES"
                              /\ writesBlocked' = [writesBlocked EXCEPT ![chunkToMove[self]] = TRUE]
                              /\ pc' = [pc EXCEPT ![self] = "DRIVER_TRANSFER_MODS"]
                              /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                              moveInProgress, ownership, 
-                                             shardDocs, stack, mods, destShard, 
-                                             i, chunkToMove, mods_, 
-                                             sourceShard, destShard_, 
-                                             docsToCopy, write, writeSuccesful, 
-                                             targetChunk, targetShard >>
+                                             shardDocs, chunkToMove, mods, 
+                                             sourceShard, destShard, 
+                                             docsToCopy, i, write, 
+                                             writeSuccesful, targetChunk, 
+                                             targetShard >>
 
 DRIVER_TRANSFER_MODS(self) == /\ pc[self] = "DRIVER_TRANSFER_MODS"
-                              /\ /\ destShard' = [destShard EXCEPT ![self] = destShard_[self]]
-                                 /\ mods' = [mods EXCEPT ![self] = mods_[self]]
-                                 /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "transferMods",
-                                                                          pc        |->  "DRIVER_CATCHUP",
-                                                                          i         |->  i[self],
-                                                                          mods      |->  mods[self],
-                                                                          destShard |->  destShard[self] ] >>
-                                                                      \o stack[self]]
-                              /\ i' = [i EXCEPT ![self] = 1]
-                              /\ pc' = [pc EXCEPT ![self] = "TRANSFER_MODS"]
+                              /\ IF i[self] <= Len(mods[self])
+                                    THEN /\ shardDocs' = [shardDocs EXCEPT ![destShard[self]][mods[self][i[self]].key] = mods[self][i[self]].value]
+                                         /\ i' = [i EXCEPT ![self] = i[self]+1]
+                                         /\ pc' = [pc EXCEPT ![self] = "DRIVER_TRANSFER_MODS"]
+                                    ELSE /\ pc' = [pc EXCEPT ![self] = "DRIVER_CATCHUP"]
+                                         /\ UNCHANGED << shardDocs, i >>
                               /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                               writesBlocked, moveInProgress, 
-                                              ownership, shardDocs, 
-                                              chunkToMove, mods_, sourceShard, 
-                                              destShard_, docsToCopy, write, 
+                                              ownership, chunkToMove, mods, 
+                                              sourceShard, destShard, 
+                                              docsToCopy, write, 
                                               writeSuccesful, targetChunk, 
                                               targetShard >>
 
 DRIVER_LAST_COMPUTE_MODS(self) == /\ pc[self] = "DRIVER_LAST_COMPUTE_MODS"
-                                  /\ mods_' = [mods_ EXCEPT ![self] = pendingWrites[chunkToMove[self]]]
+                                  /\ mods' = [mods EXCEPT ![self] = pendingWrites[chunkToMove[self]]]
                                   /\ pendingWrites' = [pendingWrites EXCEPT ![chunkToMove[self]] = <<>>]
+                                  /\ i' = [i EXCEPT ![self] = 1]
                                   /\ pc' = [pc EXCEPT ![self] = "DRIVER_LAST_TRANSFER_MODS"]
                                   /\ UNCHANGED << allDocs, chunks, 
                                                   writesBlocked, 
                                                   moveInProgress, ownership, 
-                                                  shardDocs, stack, mods, 
-                                                  destShard, i, chunkToMove, 
-                                                  sourceShard, destShard_, 
+                                                  shardDocs, chunkToMove, 
+                                                  sourceShard, destShard, 
                                                   docsToCopy, write, 
                                                   writeSuccesful, targetChunk, 
                                                   targetShard >>
 
 DRIVER_LAST_TRANSFER_MODS(self) == /\ pc[self] = "DRIVER_LAST_TRANSFER_MODS"
-                                   /\ /\ destShard' = [destShard EXCEPT ![self] = destShard_[self]]
-                                      /\ mods' = [mods EXCEPT ![self] = mods_[self]]
-                                      /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "transferMods",
-                                                                               pc        |->  "DRIVER_COMMIT_MOVE",
-                                                                               i         |->  i[self],
-                                                                               mods      |->  mods[self],
-                                                                               destShard |->  destShard[self] ] >>
-                                                                           \o stack[self]]
-                                   /\ i' = [i EXCEPT ![self] = 1]
-                                   /\ pc' = [pc EXCEPT ![self] = "TRANSFER_MODS"]
+                                   /\ IF i[self] <= Len(mods[self])
+                                         THEN /\ shardDocs' = [shardDocs EXCEPT ![destShard[self]][mods[self][i[self]].key] = mods[self][i[self]].value]
+                                              /\ i' = [i EXCEPT ![self] = i[self]+1]
+                                              /\ pc' = [pc EXCEPT ![self] = "DRIVER_LAST_TRANSFER_MODS"]
+                                         ELSE /\ pc' = [pc EXCEPT ![self] = "DRIVER_COMMIT_MOVE"]
+                                              /\ UNCHANGED << shardDocs, i >>
                                    /\ UNCHANGED << allDocs, chunks, 
                                                    pendingWrites, 
                                                    writesBlocked, 
                                                    moveInProgress, ownership, 
-                                                   shardDocs, chunkToMove, 
-                                                   mods_, sourceShard, 
-                                                   destShard_, docsToCopy, 
-                                                   write, writeSuccesful, 
-                                                   targetChunk, targetShard >>
+                                                   chunkToMove, mods, 
+                                                   sourceShard, destShard, 
+                                                   docsToCopy, write, 
+                                                   writeSuccesful, targetChunk, 
+                                                   targetShard >>
 
 DRIVER_COMMIT_MOVE(self) == /\ pc[self] = "DRIVER_COMMIT_MOVE"
                             /\ moveInProgress' = [moveInProgress EXCEPT ![chunkToMove[self]] = FALSE]
-                            /\ ownership' = [ownership EXCEPT ![chunkToMove[self]] = destShard_[self]]
+                            /\ ownership' = [ownership EXCEPT ![chunkToMove[self]] = destShard[self]]
                             /\ writesBlocked' = [writesBlocked EXCEPT ![chunkToMove[self]] = FALSE]
                             /\ pc' = [pc EXCEPT ![self] = "DRIVER_START"]
                             /\ UNCHANGED << allDocs, chunks, pendingWrites, 
-                                            shardDocs, stack, mods, destShard, 
-                                            i, chunkToMove, mods_, sourceShard, 
-                                            destShard_, docsToCopy, write, 
-                                            writeSuccesful, targetChunk, 
-                                            targetShard >>
+                                            shardDocs, chunkToMove, mods, 
+                                            sourceShard, destShard, docsToCopy, 
+                                            i, write, writeSuccesful, 
+                                            targetChunk, targetShard >>
 
 driver(self) == DRIVER_START(self) \/ DRIVER_PICK_CHUNK(self)
                    \/ DRIVER_PICK_SHARD(self) \/ DRIVER_START_MOVE(self)
                    \/ DRIVER_CLONING(self) \/ DRIVER_CATCHUP(self)
-                   \/ DRIVER_COMPUTE_MODS(self) \/ DRIVER_ENTER_CS(self)
+                   \/ DRIVER_COMPUTE_MODS(self)
                    \/ DRIVER_BLOCK_WRITES(self)
                    \/ DRIVER_TRANSFER_MODS(self)
                    \/ DRIVER_LAST_COMPUTE_MODS(self)
@@ -442,10 +399,9 @@ WRITER_START(self) == /\ pc[self] = "WRITER_START"
                       /\ pc' = [pc EXCEPT ![self] = "WRITER_TRY_WRITE"]
                       /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                       writesBlocked, moveInProgress, ownership, 
-                                      shardDocs, stack, mods, destShard, i, 
-                                      chunkToMove, mods_, sourceShard, 
-                                      destShard_, docsToCopy, targetChunk, 
-                                      targetShard >>
+                                      shardDocs, chunkToMove, mods, 
+                                      sourceShard, destShard, docsToCopy, i, 
+                                      targetChunk, targetShard >>
 
 WRITER_TRY_WRITE(self) == /\ pc[self] = "WRITER_TRY_WRITE"
                           /\ IF ~writeSuccesful[self]
@@ -456,10 +412,9 @@ WRITER_TRY_WRITE(self) == /\ pc[self] = "WRITER_TRY_WRITE"
                                      /\ UNCHANGED << targetChunk, targetShard >>
                           /\ UNCHANGED << allDocs, chunks, pendingWrites, 
                                           writesBlocked, moveInProgress, 
-                                          ownership, shardDocs, stack, mods, 
-                                          destShard, i, chunkToMove, mods_, 
-                                          sourceShard, destShard_, docsToCopy, 
-                                          write, writeSuccesful >>
+                                          ownership, shardDocs, chunkToMove, 
+                                          mods, sourceShard, destShard, 
+                                          docsToCopy, i, write, writeSuccesful >>
 
 WRITER_WRITE(self) == /\ pc[self] = "WRITER_WRITE"
                       /\ (Len(pendingWrites[targetChunk[self]]) < MAX_WRITES)
@@ -477,24 +432,22 @@ WRITER_WRITE(self) == /\ pc[self] = "WRITER_WRITE"
                                                  shardDocs, writeSuccesful >>
                       /\ pc' = [pc EXCEPT ![self] = "WRITER_TRY_WRITE"]
                       /\ UNCHANGED << chunks, writesBlocked, moveInProgress, 
-                                      ownership, stack, mods, destShard, i, 
-                                      chunkToMove, mods_, sourceShard, 
-                                      destShard_, docsToCopy, write, 
-                                      targetChunk, targetShard >>
+                                      ownership, chunkToMove, mods, 
+                                      sourceShard, destShard, docsToCopy, i, 
+                                      write, targetChunk, targetShard >>
 
 writer(self) == WRITER_START(self) \/ WRITER_TRY_WRITE(self)
                    \/ WRITER_WRITE(self)
 
-Next == (\E self \in ProcSet: transferMods(self))
-           \/ (\E self \in DRIVERS: driver(self))
+Next == (\E self \in DRIVERS: driver(self))
            \/ (\E self \in WRITERS: writer(self))
 
 Spec == /\ Init /\ [][Next]_vars
-        /\ \A self \in DRIVERS : WF_vars(driver(self)) /\ WF_vars(transferMods(self))
+        /\ \A self \in DRIVERS : WF_vars(driver(self))
         /\ \A self \in WRITERS : WF_vars(writer(self))
 
 \* END TRANSLATION 
 =============================================================================
 \* Modification History
-\* Last modified Thu May 16 17:32:33 CEST 2024 by dgomezferro
+\* Last modified Thu May 16 19:13:42 CEST 2024 by dgomezferro
 \* Created Wed May 15 14:17:17 CEST 2024 by dgomezferro
