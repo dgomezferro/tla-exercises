@@ -81,8 +81,8 @@ Consistent == \A d \in Docs : allDocs[d] = shardDocs[ownership[DocToChunk(d)]][d
 
 fair process (driver \in DRIVERS) 
 variables
-    chunkToMove = 0;
-    mods = 0;
+    chunkToMove = {};
+    mods = <<>>;
     sourceShard = 0;
     destShard = 0;
     docsToCopy = {};
@@ -145,9 +145,9 @@ DRIVER_COMMIT_MOVE:
 
 fair process (writer \in WRITERS) 
 variables
-    write = 0;
+    write = [key|->0];
     writeSuccesful = FALSE;
-    targetChunk = 0;
+    targetChunk = {};
     targetShard = 0;
 {
 WRITER_START: 
