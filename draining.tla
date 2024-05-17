@@ -13,7 +13,6 @@ WRITERS
 
 ASSUME MAX_WRITES \in 1..1000
 ASSUME THRESHOLD <= MAX_WRITES
-\*ASSUME MAX_DOCS \in 2..100
 ASSUME MAX_CHUNKS \in 2..Cardinality(DOCS)
 ASSUME MAX_VALUES \in 1..10
 
@@ -66,18 +65,6 @@ NotInProgressChunks == {x \in chunks: ~moveInProgress[x]}
 Consistent == \A d \in Docs : allDocs[d] = shardDocs[ownership[DocToChunk(d)]][d]
 
 }
-
-\* Transfers a sequence of writes to the destination shard 
-\*procedure transferMods(mods, destShard) 
-\*variables i = 1;
-\*{
-\*TRANSFER_MODS:
-\*    while (i <= Len(mods)) {
-\*        shardDocs[destShard][mods[i].key] := mods[i].value;
-\*        i := i+1;
-\*    };
-\*    return;
-\*}
 
 fair process (driver \in DRIVERS) 
 variables
@@ -177,7 +164,7 @@ WRITER_WRITE:
 
 
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "9974396f" /\ chksum(tla) = "e6a4ca2d")
+\* BEGIN TRANSLATION (chksum(pcal) = "e3fbfb48" /\ chksum(tla) = "dd245721")
 VARIABLES allDocs, chunks, pendingWrites, writesBlocked, moveInProgress, 
           ownership, shardDocs, pc
 
@@ -218,16 +205,16 @@ Init == (* Global variables *)
         /\ ownership \in [chunks -> SHARDS]
         /\ shardDocs = [x \in SHARDS |-> [y \in Docs |-> 0]]
         (* Process driver *)
-        /\ chunkToMove = [self \in DRIVERS |-> 0]
-        /\ mods = [self \in DRIVERS |-> 0]
+        /\ chunkToMove = [self \in DRIVERS |-> {}]
+        /\ mods = [self \in DRIVERS |-> <<>>]
         /\ sourceShard = [self \in DRIVERS |-> 0]
         /\ destShard = [self \in DRIVERS |-> 0]
         /\ docsToCopy = [self \in DRIVERS |-> {}]
         /\ i = [self \in DRIVERS |-> 0]
         (* Process writer *)
-        /\ write = [self \in WRITERS |-> 0]
+        /\ write = [self \in WRITERS |-> [key|->0]]
         /\ writeSuccesful = [self \in WRITERS |-> FALSE]
-        /\ targetChunk = [self \in WRITERS |-> 0]
+        /\ targetChunk = [self \in WRITERS |-> {}]
         /\ targetShard = [self \in WRITERS |-> 0]
         /\ pc = [self \in ProcSet |-> CASE self \in DRIVERS -> "DRIVER_START"
                                         [] self \in WRITERS -> "WRITER_START"]
@@ -449,5 +436,5 @@ Spec == /\ Init /\ [][Next]_vars
 \* END TRANSLATION 
 =============================================================================
 \* Modification History
-\* Last modified Thu May 16 19:13:42 CEST 2024 by dgomezferro
+\* Last modified Fri May 17 10:33:57 CEST 2024 by dgomezferro
 \* Created Wed May 15 14:17:17 CEST 2024 by dgomezferro
